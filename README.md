@@ -35,6 +35,54 @@ As default it is not possible to install Updates via Remote Powershell, therefor
 If you have a high amount of servers and want to start all at the same time, enable them with the last checkbox and press "Start All"<br>
 For each server you selected or clicked start a powershell window will open and ask you which updates should be installed or show you the progress of the installation directly (if you checked AcceptAll)
 
+# Building
+
+The project targets **.NET Framework 4.7.2** and ships as a WPF desktop
+application. The recommended way to build the executable is on a Windows
+machine with Visual Studio 2019 (or newer) or the standalone Build Tools.
+
+1. Install the [.NET Framework 4.7.2 Developer Pack](https://dotnet.microsoft.com/en-us/download/dotnet-framework/net472) if it
+   is not already present.
+2. Install either **Visual Studio** with the “.NET desktop development”
+   workload or the [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio).
+3. Clone this repository and open a **Developer Command Prompt for
+   Visual Studio**.
+4. Restore NuGet packages (only required once):
+
+   ```powershell
+   nuget restore RemoteUpdate.sln
+   ```
+
+5. Build the solution in the desired configuration (Debug shown below):
+
+   ```powershell
+   msbuild RemoteUpdate.sln /p:Configuration=Debug
+   ```
+
+   For a release-ready executable, use `/p:Configuration=Release`.
+
+6. The compiled application will be located at
+   `RemoteUpdate\bin\<Configuration>\RemoteUpdate.exe`.
+
+You can also build directly inside Visual Studio by opening the solution
+file (`RemoteUpdate.sln`) and selecting **Build ▸ Build Solution**.
+
+# Testing
+
+There are currently no automated tests. The following manual smoke tests
+help verify that the reorder functionality works end-to-end:
+
+1. Launch the freshly built `RemoteUpdate.exe`.
+2. Add at least three servers (or sample hostnames) so multiple rows are
+   visible.
+3. Use the ▲ and ▼ buttons to move servers up and down. Confirm that:
+   * The server names swap correctly.
+   * Checkbox states, combo-box selections, and status indicators travel
+     with the server being moved.
+   * The highlighted row, if any, follows the server after reordering.
+4. Click **Save** and restart the application to ensure the new order is
+   persisted in `RemoteUpdateServer.xml`.
+
 # FAQ
 * Are the credentials i saved safe? The credentials are encrypted with a SHA512 method. The EncryptionKey is your chosen password and the salt comes from the servername of each entry. Therefore it is not possible to determine if you use the same passwords on more servers. I hope it is good enough but can not guarantee anything.
 * Can i use it in a productive environment? Please decide for yourself after you tested it in your lab

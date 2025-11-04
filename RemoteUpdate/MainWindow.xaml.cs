@@ -117,6 +117,7 @@ namespace RemoteUpdate
             // Add Controls for each Server loaded
             for (int ii = 1; ii < ServerNumber + 1; ii++)
             {
+                CreateReorderButtons(ii);
                 // ServerName Textbox creation
                 string tmpText = "";
                 bool tmpBool = false;
@@ -411,6 +412,37 @@ namespace RemoteUpdate
             ComboBox1.SelectionChanged += btnevent;
             GridMainWindow.Children.Add(ComboBox1);
         }
+        private void CreateReorderButtons(int index)
+        {
+            double baseTopMargin = 30 * ((index + 1) - 1) + 29;
+            Button buttonUp = new Button()
+            {
+                Name = "ButtonMoveUp_" + index,
+                Content = "\u25B2",
+                Width = 20,
+                Height = 18,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+                VerticalAlignment = System.Windows.VerticalAlignment.Top,
+                Margin = new Thickness(0, baseTopMargin, 0, 0),
+                ToolTip = "Move server up"
+            };
+            buttonUp.Click += ButtonMoveUp_Click;
+            GridMainWindow.Children.Add(buttonUp);
+
+            Button buttonDown = new Button()
+            {
+                Name = "ButtonMoveDown_" + index,
+                Content = "\u25BC",
+                Width = 20,
+                Height = 18,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+                VerticalAlignment = System.Windows.VerticalAlignment.Top,
+                Margin = new Thickness(0, baseTopMargin + 16, 0, 0),
+                ToolTip = "Move server down"
+            };
+            buttonDown.Click += ButtonMoveDown_Click;
+            GridMainWindow.Children.Add(buttonDown);
+        }
         /// <summary>
         /// Event Function that calls two functions for Textbox LostFocus Handling
         /// </summary>
@@ -441,6 +473,7 @@ namespace RemoteUpdate
             {
                 // Textbox Servername creation
                 CreateTextbox("TextBoxServer_" + list.Length, "", 18, 120, 20, 30 * (list.Length + 1));
+                CreateReorderButtons(list.Length);
                 // Uptime Label creation
                 CreateLabel("LabelUptime_" + list.Length, "", 26, 90, 150, 30 * (list.Length + 1) - 4, Visibility.Visible);
                 // Accept Checkbox creation
@@ -558,6 +591,16 @@ namespace RemoteUpdate
         private void ButtonTime_Click(object sender, RoutedEventArgs e)
         {
             HideTime(Int32.Parse((sender as Button).Name.Split('_')[1], Global.cultures));
+        }
+
+        private void ButtonMoveUp_Click(object sender, RoutedEventArgs e)
+        {
+            MoveServerRow(Int32.Parse((sender as Button).Name.Split('_')[1], Global.cultures), -1);
+        }
+
+        private void ButtonMoveDown_Click(object sender, RoutedEventArgs e)
+        {
+            MoveServerRow(Int32.Parse((sender as Button).Name.Split('_')[1], Global.cultures), 1);
         }
 
         private void ButtonStartAll_Click(object sender, RoutedEventArgs e)
@@ -758,6 +801,253 @@ namespace RemoteUpdate
             GridMainWindow.Children.OfType<Button>().Where(btn => btn.Name.Equals("ButtonTime_" + line.ToString(Global.cultures), StringComparison.Ordinal)).FirstOrDefault().Visibility = System.Windows.Visibility.Hidden;
             GridMainWindow.Children.OfType<Button>().Where(btn => btn.Name.Equals("ButtonStart_" + line.ToString(Global.cultures), StringComparison.Ordinal)).FirstOrDefault().Visibility = System.Windows.Visibility.Visible;
             GridMainWindow.Children.OfType<GifImage>().Where(gif => gif.Name.Equals("gifImage_" + line.ToString(Global.cultures), StringComparison.Ordinal)).FirstOrDefault().Visibility = System.Windows.Visibility.Hidden;
+        }
+
+        private void MoveServerRow(int index, int offset)
+        {
+            int lastServerIndex = GetLastServerIndex();
+            if (lastServerIndex < 0)
+            {
+                return;
+            }
+            if (index < 0 || index >= Global.TableRuntime.Rows.Count || index > lastServerIndex)
+            {
+                return;
+            }
+            TextBox currentTextBox = GetServerTextBox(index);
+            bool hasServerName = currentTextBox != null && currentTextBox.Text.Length > 0;
+            if (!hasServerName && Global.TableRuntime.Rows[index]["Servername"].ToString().Length == 0)
+            {
+                return;
+            }
+            int targetIndex = index + offset;
+            if (targetIndex < 0 || targetIndex >= Global.TableRuntime.Rows.Count || targetIndex > lastServerIndex)
+            {
+                return;
+            }
+            if (index == targetIndex)
+            {
+                return;
+            }
+            SwapServerRows(index, targetIndex);
+        }
+
+        private void SwapServerRows(int sourceIndex, int targetIndex)
+        {
+            ServerRowState sourceState = CaptureRowState(sourceIndex);
+            ServerRowState targetState = CaptureRowState(targetIndex);
+
+            ApplyRowState(sourceIndex, targetState);
+            ApplyRowState(targetIndex, sourceState);
+
+            object[] sourceItems = Global.TableRuntime.Rows[sourceIndex].ItemArray;
+            Global.TableRuntime.Rows[sourceIndex].ItemArray = Global.TableRuntime.Rows[targetIndex].ItemArray;
+            Global.TableRuntime.Rows[targetIndex].ItemArray = sourceItems;
+        }
+
+        private ServerRowState CaptureRowState(int index)
+        {
+            ServerRowState state = new ServerRowState();
+            TextBox serverTextBox = GetServerTextBox(index);
+            if (serverTextBox != null)
+            {
+                state.ServerName = serverTextBox.Text;
+                state.TextBoxBackground = serverTextBox.Background;
+            }
+            Label uptimeLabel = GetUptimeLabel(index);
+            if (uptimeLabel != null)
+            {
+                state.UptimeContent = uptimeLabel.Content;
+            }
+            state.Accept = GetCheckBox("CheckboxAccept_", index)?.IsChecked;
+            state.Drivers = GetCheckBox("CheckboxDrivers_", index)?.IsChecked;
+            state.Reboot = GetCheckBox("CheckboxReboot_", index)?.IsChecked;
+            state.GUI = GetCheckBox("CheckboxGUI_", index)?.IsChecked;
+            state.Mail = GetCheckBox("CheckboxMail_", index)?.IsChecked;
+            state.Enabled = GetCheckBox("CheckboxEnabled_", index)?.IsChecked;
+            Button startButton = GetButton("ButtonStart_" + index);
+            if (startButton != null)
+            {
+                state.StartButtonContent = startButton.Content;
+                state.StartButtonVisibility = startButton.Visibility;
+            }
+            Button timeButton = GetButton("ButtonTime_" + index);
+            if (timeButton != null)
+            {
+                state.TimeButtonContent = timeButton.Content;
+                state.TimeButtonVisibility = timeButton.Visibility;
+            }
+            ComboBox comboBox = GetComboBox(index);
+            if (comboBox != null)
+            {
+                state.ComboBoxSelectedIndex = comboBox.SelectedIndex;
+            }
+            GifImage gifImage = GetGifImage(index);
+            if (gifImage != null)
+            {
+                state.GifVisibility = gifImage.Visibility;
+                state.GifSource = gifImage.Source;
+            }
+            return state;
+        }
+
+        private void ApplyRowState(int index, ServerRowState state)
+        {
+            TextBox serverTextBox = GetServerTextBox(index);
+            if (serverTextBox != null)
+            {
+                serverTextBox.Text = state.ServerName;
+                if (state.TextBoxBackground != null)
+                {
+                    serverTextBox.Background = state.TextBoxBackground;
+                }
+            }
+            Label uptimeLabel = GetUptimeLabel(index);
+            if (uptimeLabel != null)
+            {
+                uptimeLabel.Content = state.UptimeContent;
+            }
+            SetCheckboxState(GetCheckBox("CheckboxAccept_", index), state.Accept);
+            SetCheckboxState(GetCheckBox("CheckboxDrivers_", index), state.Drivers);
+            SetCheckboxState(GetCheckBox("CheckboxReboot_", index), state.Reboot);
+            SetCheckboxState(GetCheckBox("CheckboxGUI_", index), state.GUI);
+            SetCheckboxState(GetCheckBox("CheckboxMail_", index), state.Mail);
+            SetCheckboxState(GetCheckBox("CheckboxEnabled_", index), state.Enabled);
+            Button startButton = GetButton("ButtonStart_" + index);
+            if (startButton != null)
+            {
+                startButton.Content = state.StartButtonContent;
+                startButton.Visibility = state.StartButtonVisibility;
+            }
+            Button timeButton = GetButton("ButtonTime_" + index);
+            if (timeButton != null)
+            {
+                timeButton.Content = state.TimeButtonContent;
+                timeButton.Visibility = state.TimeButtonVisibility;
+            }
+            ComboBox comboBox = GetComboBox(index);
+            if (comboBox != null)
+            {
+                SetComboBoxSelectedIndex(comboBox, state.ComboBoxSelectedIndex);
+            }
+            GifImage gifImage = GetGifImage(index);
+            if (gifImage != null)
+            {
+                gifImage.StopAnimation();
+                gifImage.Source = state.GifSource;
+                gifImage.Visibility = state.GifVisibility;
+                if (state.GifVisibility == Visibility.Visible && state.GifSource != null)
+                {
+                    gifImage.StartAnimation();
+                }
+            }
+        }
+
+        private int GetLastServerIndex()
+        {
+            for (int ii = Global.TableRuntime.Rows.Count - 1; ii >= 0; ii--)
+            {
+                TextBox serverTextBox = GetServerTextBox(ii);
+                if (serverTextBox != null && serverTextBox.Text.Length > 0)
+                {
+                    return ii;
+                }
+                if (ii < Global.TableRuntime.Rows.Count && Global.TableRuntime.Rows[ii]["Servername"].ToString().Length > 0)
+                {
+                    return ii;
+                }
+            }
+            return -1;
+        }
+
+        private void SetCheckboxState(CheckBox checkBox, bool? value)
+        {
+            if (checkBox == null)
+            {
+                return;
+            }
+            if (checkBox.Name.StartsWith("CheckboxAccept_", StringComparison.Ordinal) || checkBox.Name.StartsWith("CheckboxGUI_", StringComparison.Ordinal))
+            {
+                checkBox.Checked -= CheckboxChangedGUIAccept;
+                checkBox.Unchecked -= CheckboxChangedGUIAccept;
+                checkBox.IsChecked = value;
+                checkBox.Checked += CheckboxChangedGUIAccept;
+                checkBox.Unchecked += CheckboxChangedGUIAccept;
+            }
+            else
+            {
+                checkBox.Unchecked -= CheckBoxChangedServer;
+                checkBox.IsChecked = value;
+                checkBox.Unchecked += CheckBoxChangedServer;
+            }
+        }
+
+        private void SetComboBoxSelectedIndex(ComboBox comboBox, int selectedIndex)
+        {
+            if (comboBox == null)
+            {
+                return;
+            }
+            comboBox.SelectionChanged -= ComboBox_SelectionChanged;
+            if (selectedIndex >= -1 && selectedIndex < comboBox.Items.Count)
+            {
+                comboBox.SelectedIndex = selectedIndex;
+            }
+            else
+            {
+                comboBox.SelectedIndex = -1;
+            }
+            comboBox.SelectionChanged += ComboBox_SelectionChanged;
+        }
+
+        private TextBox GetServerTextBox(int index)
+        {
+            return GridMainWindow.Children.OfType<TextBox>().Where(tb => tb.Name.Equals("TextBoxServer_" + index, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private Label GetUptimeLabel(int index)
+        {
+            return GridMainWindow.Children.OfType<Label>().Where(lbl => lbl.Name.Equals("LabelUptime_" + index, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private CheckBox GetCheckBox(string prefix, int index)
+        {
+            return GridMainWindow.Children.OfType<CheckBox>().Where(cb => cb.Name.Equals(prefix + index, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private Button GetButton(string name)
+        {
+            return GridMainWindow.Children.OfType<Button>().Where(btn => btn.Name.Equals(name, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private ComboBox GetComboBox(int index)
+        {
+            return GridMainWindow.Children.OfType<ComboBox>().Where(cb => cb.Name.Equals("ComboBox_" + index, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private GifImage GetGifImage(int index)
+        {
+            return GridMainWindow.Children.OfType<GifImage>().Where(gif => gif.Name.Equals("gifImage_" + index, StringComparison.Ordinal)).FirstOrDefault();
+        }
+
+        private sealed class ServerRowState
+        {
+            public string ServerName { get; set; } = string.Empty;
+            public Brush TextBoxBackground { get; set; }
+            public object UptimeContent { get; set; }
+            public bool? Accept { get; set; }
+            public bool? Drivers { get; set; }
+            public bool? Reboot { get; set; }
+            public bool? GUI { get; set; }
+            public bool? Mail { get; set; }
+            public bool? Enabled { get; set; }
+            public object StartButtonContent { get; set; }
+            public Visibility StartButtonVisibility { get; set; } = Visibility.Visible;
+            public object TimeButtonContent { get; set; }
+            public Visibility TimeButtonVisibility { get; set; } = Visibility.Hidden;
+            public int ComboBoxSelectedIndex { get; set; } = -1;
+            public Visibility GifVisibility { get; set; } = Visibility.Hidden;
+            public ImageSource GifSource { get; set; }
         }
 
         private void RemoteUpdate_Closing(object sender, System.ComponentModel.CancelEventArgs e)
