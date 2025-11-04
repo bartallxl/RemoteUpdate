@@ -16,6 +16,8 @@
         <Label x:Name="LabelMail" Content="Mail" HorizontalAlignment="Left" Margin="482,-1,0,0" VerticalAlignment="Top" ToolTip="Check if you want a mail sent to you after the upgrade (see Settings)"/>
         <Label x:Name="LabelEnabled" Content="Enabled" HorizontalAlignment="Left" Margin="720,-1,0,0" VerticalAlignment="Top" ToolTip="Check if you want this Server to install the updates when you click 'Start All'"/>
 
+        <Button x:Name="ButtonMoveUp_0" Content="▲" HorizontalAlignment="Left" Margin="0,29,0,0" VerticalAlignment="Top" Width="20" Height="18" Click="ButtonMoveUp_Click" ToolTip="Move server up"/>
+        <Button x:Name="ButtonMoveDown_0" Content="▼" HorizontalAlignment="Left" Margin="0,45,0,0" VerticalAlignment="Top" Width="20" Height="18" Click="ButtonMoveDown_Click" ToolTip="Move server down"/>
         <TextBox x:Name="TextBoxServer_0" HorizontalAlignment="Left" Margin="20,30,0,0" Text="" TextWrapping="NoWrap" VerticalAlignment="Top" Width="120" Height="18" Background="White" LostFocus="TextboxLostFocus"/>
         <Label x:Name="LabelServer_0" Content="" HorizontalAlignment="Left" Margin="20,30,0,0" VerticalAlignment="Top" Height="18" Width="120" Visibility="Hidden"/>
         <Label x:Name="LabelUptime_0" Content="" HorizontalAlignment="Left" Margin="150,27,0,0" VerticalAlignment="Top" Height="26" Width="90"/>
