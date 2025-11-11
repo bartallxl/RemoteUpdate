@@ -8,7 +8,7 @@ It is meant for small environments where no SCCM or other solutions are existent
 As default it is not possible to install Updates via Remote Powershell, therefore the tool uses a little workaround with a Powershell VirtualAccount.
 
 # Requirements:
-* Windows Server 2012 or newer
+* Windows Server 2012 or newer (including Windows Server 2022 and Windows Server 2025 clients)
 * Powershell 5
 * .net Framework 4.7.2 on executing host
 * ICMP Echo allowed on the remote hosts
