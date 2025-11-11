@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Net;
 using System.Net.Mail;
@@ -144,6 +145,10 @@ namespace RemoteUpdate
                 strFailureMessage = "Credentials";
                 return false;
             }
+            if (!CheckServerCompatibility(line, out strFailureMessage))
+            {
+                return false;
+            }
             // Check if Package Provider NuGet is installed
             if (!CheckPSConnectionPrerequisiteProvider(line))
             {
@@ -176,6 +181,81 @@ namespace RemoteUpdate
             }
             strFailureMessage = "OK";
             return true;
+        }
+        public static bool CheckServerCompatibility(int line, out string strFailureMessage)
+        {
+            var sessionState = InitialSessionState.CreateDefault();
+            using (var psRunspace = RunspaceFactory.CreateRunspace(sessionState))
+            {
+                psRunspace.Open();
+                Pipeline pipeline = psRunspace.CreatePipeline();
+                string tmpUsername = Global.TableRuntime.Rows[line]["Username"].ToString();
+                string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
+                string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
+                string tmpCommand = "Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version";
+                if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
+                {
+                    pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
+                    pipeline.Commands.AddScript("$Cred = New-Object System.Management.Automation.PSCredential -ArgumentList '" + tmpUsername + "',$pass;");
+                    pipeline.Commands.AddScript("Invoke-Command -Credential $Cred -ComputerName '" + tmpServername + "' { " + tmpCommand + " };");
+                }
+                else
+                {
+                    pipeline.Commands.AddScript("Invoke-Command -ComputerName '" + tmpServername + "' { " + tmpCommand + " };");
+                }
+                try
+                {
+                    var exResults = pipeline.Invoke();
+                    if (exResults.Count > 0)
+                    {
+                        PSObject osInfo = exResults[0];
+                        string caption = osInfo.Members["Caption"]?.Value?.ToString() ?? string.Empty;
+                        string version = osInfo.Members["Version"]?.Value?.ToString() ?? string.Empty;
+                        string osDetails = caption.Length > 0 ? caption : "Windows";
+                        if (version.Length > 0)
+                        {
+                            osDetails += " (" + version + ")";
+                        }
+                        if (Version.TryParse(version, out Version parsedVersion))
+                        {
+                            Version minimumSupported = new Version(6, 2);
+                            if (parsedVersion >= minimumSupported)
+                            {
+                                WriteLogFile(0, "Server " + tmpServername.ToUpper(Global.cultures) + " runs " + osDetails + ", which is supported.");
+                                strFailureMessage = "OK";
+                                return true;
+                            }
+                            WriteLogFile(1, "Server " + tmpServername.ToUpper(Global.cultures) + " runs " + osDetails + ", which is not supported. Windows Server 2012 or newer is required.");
+                            strFailureMessage = "UnsupportedOS";
+                            return false;
+                        }
+                        WriteLogFile(1, "Server " + tmpServername.ToUpper(Global.cultures) + " returned the operating system version '" + version + "', which could not be parsed.");
+                        strFailureMessage = "OSVersion";
+                        return false;
+                    }
+                    WriteLogFile(1, "No operating system information was returned for server " + tmpServername.ToUpper(Global.cultures) + ".");
+                    strFailureMessage = "OSVersion";
+                    return false;
+                }
+                catch (PSSnapInException ee)
+                {
+                    WriteLogFile(2, "Could not query the operating system version for server " + tmpServername.ToUpper(Global.cultures) + ": " + ee.Message);
+                    strFailureMessage = "OSVersion";
+                    return false;
+                }
+                catch (RuntimeException ee)
+                {
+                    WriteLogFile(2, "Could not query the operating system version for server " + tmpServername.ToUpper(Global.cultures) + ": " + ee.Message);
+                    strFailureMessage = "OSVersion";
+                    return false;
+                }
+                catch (Exception ee)
+                {
+                    WriteLogFile(2, "Could not query the operating system version for server " + tmpServername.ToUpper(Global.cultures) + ": " + ee.Message);
+                    strFailureMessage = "OSVersion";
+                    return false;
+                }
+            }
         }
         public static bool CheckPSConnectionPrerequisiteCredentials(int line)
         {
@@ -408,7 +488,8 @@ namespace RemoteUpdate
                 string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
                 string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
                 string tmpVirtualAccount = Global.TableSettings.Rows[0]["PSVirtualAccountName"].ToString();
-                string tmpCommand = "";
+                string tmpVirtualAccountEscaped = tmpVirtualAccount.Replace("'", "''");
+                string tmpCommand = "Get-PSSessionConfiguration -Name '" + tmpVirtualAccountEscaped + "' -ErrorAction SilentlyContinue";
                 if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
                 {
                     pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
@@ -453,7 +534,12 @@ namespace RemoteUpdate
                 string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
                 string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
                 string tmpVirtualAccount = Global.TableSettings.Rows[0]["PSVirtualAccountName"].ToString();
-                string tmpCommand = "New-PSSessionConfigurationFile -RunAsVirtualAccount -Path .\\" + tmpVirtualAccount + ".pssc; Register-PSSessionConfiguration -Name '" + tmpVirtualAccount + "' -Path .\\" + tmpVirtualAccount + ".pssc -Force;";
+                string tmpVirtualAccountEscaped = tmpVirtualAccount.Replace("'", "''");
+                string tmpCommand = "$configName = '" + tmpVirtualAccountEscaped + "';";
+                tmpCommand += "$configPath = Join-Path $env:ProgramData ($configName + '.pssc');";
+                tmpCommand += "New-PSSessionConfigurationFile -RunAsVirtualAccount -Path $configPath -Force;";
+                tmpCommand += "Register-PSSessionConfiguration -Name $configName -Path $configPath -Force;";
+                tmpCommand += "Get-PSSessionConfiguration -Name $configName -ErrorAction SilentlyContinue;";
                 if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
                 {
                     pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
@@ -467,8 +553,16 @@ namespace RemoteUpdate
                 try
                 {
                     var exResults = pipeline.Invoke();
-                    WriteLogFile(0, "Powershell VirtualAccount \"" + tmpVirtualAccount + "\" was created on " + tmpServername.ToUpper(Global.cultures));
-                    returnValue = true;
+                    if (exResults.Count > 0 && !pipeline.HadErrors)
+                    {
+                        WriteLogFile(0, "Powershell VirtualAccount \"" + tmpVirtualAccount + "\" was created on " + tmpServername.ToUpper(Global.cultures));
+                        returnValue = true;
+                    }
+                    else
+                    {
+                        WriteLogFile(1, "Powershell VirtualAccount \"" + tmpVirtualAccount + "\" could not be verified on " + tmpServername.ToUpper(Global.cultures));
+                        returnValue = false;
+                    }
                 }
                 catch (PSSnapInException ee)
                 {
