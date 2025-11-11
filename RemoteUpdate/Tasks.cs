@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Net;
 using System.Net.Mail;
@@ -18,6 +19,10 @@ namespace RemoteUpdate
 {
     class Tasks
     {
+        private static readonly Version LegacyPsWindowsUpdateVersion = new Version(2, 1, 1, 2);
+        private static readonly Version ModernPsWindowsUpdateVersion = new Version(2, 2, 0, 3);
+        private static readonly Version WindowsServer2022Version = new Version(10, 0, 20348, 0);
+
         public static string Encrypt(string clearText, string strServername, string EncryptionKey)
         {
             try
@@ -138,12 +143,30 @@ namespace RemoteUpdate
         }
         public static bool CreatePSConnectionPrerequisites(int line, out string strFailureMessage)
         {
+            string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
             // Check Credentials with a single Connection first
             if (!CheckPSConnectionPrerequisiteCredentials(line))
             {
                 strFailureMessage = "Credentials";
                 return false;
             }
+            Version remoteOsVersion = null;
+            string remoteOsCaption = string.Empty;
+            if (TryGetRemoteOsMetadata(line, out remoteOsVersion, out remoteOsCaption))
+            {
+                LockAndWriteDataTable(Global.TableRuntime, line, "OSVersion", remoteOsVersion.ToString(), 100);
+                LockAndWriteDataTable(Global.TableRuntime, line, "OSCaption", remoteOsCaption, 100);
+                WriteLogFile(0, "Detected remote OS " + remoteOsCaption + " (" + remoteOsVersion + ") on " + tmpServername.ToUpper(Global.cultures), true);
+            }
+            else
+            {
+                LockAndWriteDataTable(Global.TableRuntime, line, "OSVersion", string.Empty, 100);
+                LockAndWriteDataTable(Global.TableRuntime, line, "OSCaption", string.Empty, 100);
+                WriteLogFile(1, "Could not determine remote OS information for " + tmpServername.ToUpper(Global.cultures));
+            }
+            Version requiredModuleVersion = DetermineRequiredPsWindowsUpdateVersion(remoteOsVersion);
+            LockAndWriteDataTable(Global.TableRuntime, line, "RequiredPSWUModuleVersion", requiredModuleVersion.ToString(), 100);
+            WriteLogFile(0, "PSWindowsUpdate minimum version " + requiredModuleVersion + " required for " + tmpServername.ToUpper(Global.cultures), true);
             // Check if Package Provider NuGet is installed
             if (!CheckPSConnectionPrerequisiteProvider(line))
             {
@@ -155,10 +178,10 @@ namespace RemoteUpdate
                 }
             }
             // Check if Powershell Module PSWindowsUpdate is installed
-            if (!CheckPSConnectionPrerequisiteModule(line))
+            if (!CheckPSConnectionPrerequisiteModule(line, requiredModuleVersion))
             {
                 // Install Powershell Module PSWindowsUpdate
-                if (!CreatePSConnectionPrerequisiteModule(line))
+                if (!CreatePSConnectionPrerequisiteModule(line, requiredModuleVersion))
                 {
                     strFailureMessage = "PSWindowsUpdate";
                     return false;
@@ -308,7 +331,69 @@ namespace RemoteUpdate
             }
             return returnValue;
         }
-        public static bool CheckPSConnectionPrerequisiteModule(int line)
+        private static bool TryGetRemoteOsMetadata(int line, out Version osVersion, out string osCaption)
+        {
+            osVersion = null;
+            osCaption = string.Empty;
+            var sessionState = InitialSessionState.CreateDefault();
+            using (var psRunspace = RunspaceFactory.CreateRunspace(sessionState))
+            {
+                psRunspace.Open();
+                Pipeline pipeline = psRunspace.CreatePipeline();
+                string tmpUsername = Global.TableRuntime.Rows[line]["Username"].ToString();
+                string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
+                string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
+                string tmpCommand = "$os = Get-CimInstance -ClassName Win32_OperatingSystem; [PSCustomObject]@{ Version = $os.Version; Caption = $os.Caption }";
+                if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
+                {
+                    pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
+                    pipeline.Commands.AddScript("$Cred = New-Object System.Management.Automation.PSCredential -ArgumentList '" + tmpUsername + "',$pass;");
+                    pipeline.Commands.AddScript("Invoke-Command -Credential $Cred -ComputerName '" + tmpServername + "' { " + tmpCommand + " };");
+                }
+                else
+                {
+                    pipeline.Commands.AddScript("Invoke-Command -ComputerName '" + tmpServername + "' { " + tmpCommand + " };");
+                }
+                try
+                {
+                    var exResults = pipeline.Invoke();
+                    if (exResults.Count > 0)
+                    {
+                        PSObject result = exResults[0];
+                        string versionString = result.Properties["Version"]?.Value?.ToString();
+                        osCaption = result.Properties["Caption"]?.Value?.ToString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(versionString) && Version.TryParse(versionString, out Version parsedVersion))
+                        {
+                            osVersion = parsedVersion;
+                            return true;
+                        }
+                        WriteLogFile(1, "Received invalid OS version information from " + tmpServername.ToUpper(Global.cultures) + ": " + versionString);
+                    }
+                    else
+                    {
+                        WriteLogFile(1, "No OS information returned from " + tmpServername.ToUpper(Global.cultures));
+                    }
+                }
+                catch (RuntimeException ee)
+                {
+                    WriteLogFile(2, "Failed to query OS information from " + tmpServername.ToUpper(Global.cultures) + ": " + ee.Message);
+                }
+                catch (PSSnapInException ee)
+                {
+                    WriteLogFile(2, "Failed to query OS information from " + tmpServername.ToUpper(Global.cultures) + ": " + ee.Message);
+                }
+            }
+            return false;
+        }
+        private static Version DetermineRequiredPsWindowsUpdateVersion(Version osVersion)
+        {
+            if (osVersion != null && osVersion.CompareTo(WindowsServer2022Version) >= 0)
+            {
+                return ModernPsWindowsUpdateVersion;
+            }
+            return LegacyPsWindowsUpdateVersion;
+        }
+        public static bool CheckPSConnectionPrerequisiteModule(int line, Version requiredModuleVersion)
         {
             var sessionState = InitialSessionState.CreateDefault();
             bool returnValue = false;
@@ -319,7 +404,7 @@ namespace RemoteUpdate
                 string tmpUsername = Global.TableRuntime.Rows[line]["Username"].ToString();
                 string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
                 string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
-                string tmpCommand = "Get-Module -ListAvailable -Name PSWindowsUpdate  | Where { $_.Version -ge [version]('2.1.1.2') }";
+                string tmpCommand = "Get-Module -ListAvailable -Name PSWindowsUpdate  | Where { $_.Version -ge [version]('" + requiredModuleVersion.ToString() + "') }";
                 if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
                 {
                     pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
@@ -335,12 +420,12 @@ namespace RemoteUpdate
                     var exResults = pipeline.Invoke();
                     if (exResults.Count > 0)
                     {
-                        WriteLogFile(0, "Module PSWindowsUpdate is installed on " + tmpServername.ToUpper(Global.cultures));
+                        WriteLogFile(0, "Module PSWindowsUpdate is installed on " + tmpServername.ToUpper(Global.cultures) + " and meets version " + requiredModuleVersion);
                         returnValue = true;
                     }
                     else
                     {
-                        WriteLogFile(1, "Module PSWindowsUpdate is not installed on " + tmpServername.ToUpper(Global.cultures));
+                        WriteLogFile(1, "Module PSWindowsUpdate version " + requiredModuleVersion + " is not available on " + tmpServername.ToUpper(Global.cultures));
                         returnValue = false;
                     }
                 }
@@ -352,7 +437,7 @@ namespace RemoteUpdate
             }
             return returnValue;
         }
-        public static bool CreatePSConnectionPrerequisiteModule(int line)
+        public static bool CreatePSConnectionPrerequisiteModule(int line, Version requiredModuleVersion)
         {
             var sessionState = InitialSessionState.CreateDefault();
             bool returnValue = false;
@@ -363,7 +448,7 @@ namespace RemoteUpdate
                 string tmpUsername = Global.TableRuntime.Rows[line]["Username"].ToString();
                 string tmpPassword = Global.TableRuntime.Rows[line]["Password"].ToString();
                 string tmpServername = Global.TableRuntime.Rows[line]["Servername"].ToString();
-                string tmpCommand = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Install-Module PSWindowsUpdate -MinimumVersion 2.1.1.2 -Force";
+                string tmpCommand = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted -ErrorAction SilentlyContinue; Install-Module PSWindowsUpdate -MinimumVersion " + requiredModuleVersion.ToString() + " -Force -Confirm:$false -AcceptLicense -ErrorAction Stop";
                 if (tmpUsername.Length != 0 && tmpPassword.Length != 0)
                 {
                     pipeline.Commands.AddScript("$pass = ConvertTo-SecureString -AsPlainText '" + tmpPassword + "' -Force;");
@@ -379,12 +464,12 @@ namespace RemoteUpdate
                     var exResults = pipeline.Invoke();
                     if (!pipeline.HadErrors)
                     {
-                        WriteLogFile(0, "Module PSWindowsUpdate got successfully installed on " + tmpServername.ToUpper(Global.cultures));
+                        WriteLogFile(0, "Module PSWindowsUpdate got successfully installed on " + tmpServername.ToUpper(Global.cultures) + " with minimum version " + requiredModuleVersion);
                         returnValue = true;
                     }
                     else
                     {
-                        WriteLogFile(1, "Module PSWindowsUpdate could not be installed on " + tmpServername.ToUpper(Global.cultures));
+                        WriteLogFile(1, "Module PSWindowsUpdate could not be installed on " + tmpServername.ToUpper(Global.cultures) + " with minimum version " + requiredModuleVersion);
                         returnValue = false;
                     }
                 }
