@@ -35,6 +35,9 @@ namespace RemoteUpdate
             Global.TableRuntime.Columns.Add("Ping");
             Global.TableRuntime.Columns.Add("Uptime");
             Global.TableRuntime.Columns.Add("PID");
+            Global.TableRuntime.Columns.Add("OSVersion");
+            Global.TableRuntime.Columns.Add("OSCaption");
+            Global.TableRuntime.Columns.Add("RequiredPSWUModuleVersion");
             // Get Grid to add more Controls
             GridMainWindow = this.Content as Grid;
             // Load Schema and Data from XML RemoteUpdateSettings.xml
@@ -93,6 +96,9 @@ namespace RemoteUpdate
                 this.CheckboxEnabled_0.IsChecked = Convert.ToBoolean(LoadTable.Rows[0]["Enabled"], Global.cultures);
                 // Create first DataRow in Global.TableRuntime
                 System.Data.DataRow dtrow = Global.TableRuntime.NewRow();
+                dtrow["OSVersion"] = string.Empty;
+                dtrow["OSCaption"] = string.Empty;
+                dtrow["RequiredPSWUModuleVersion"] = string.Empty;
                 dtrow["Servername"] = LoadTable.Rows[0]["Server"].ToString();
                 dtrow["IP"] = Tasks.GetIPfromHostname(LoadTable.Rows[0]["Server"].ToString());
                 dtrow["Username"] = LoadTable.Rows[0]["Username"].ToString();
@@ -107,7 +113,11 @@ namespace RemoteUpdate
                 // If no XML could be read, set the Servernumber to 0
                 ServerNumber = 0;
                 // Create Empty Data Row
-                Global.TableRuntime.Rows.Add(Global.TableRuntime.NewRow());
+                System.Data.DataRow emptyRow = Global.TableRuntime.NewRow();
+                emptyRow["OSVersion"] = string.Empty;
+                emptyRow["OSCaption"] = string.Empty;
+                emptyRow["RequiredPSWUModuleVersion"] = string.Empty;
+                Global.TableRuntime.Rows.Add(emptyRow);
                 Tasks.WriteLogFile(0, "Empty row 1 created", true);
             }
             // Create BackgroundWorker (Ping and Uptime)
@@ -166,6 +176,9 @@ namespace RemoteUpdate
                 }
                 // Create new Row in TableRuntime
                 System.Data.DataRow dtrow = Global.TableRuntime.NewRow();
+                dtrow["OSVersion"] = string.Empty;
+                dtrow["OSCaption"] = string.Empty;
+                dtrow["RequiredPSWUModuleVersion"] = string.Empty;
                 if (ii < LoadTable.Rows.Count)
                 {
                     dtrow["Servername"] = LoadTable.Rows[ii]["Server"].ToString();
@@ -512,6 +525,9 @@ namespace RemoteUpdate
                     Application.Current.MainWindow.Height = 170 + list.Length * 30;
                 }
                 System.Data.DataRow dtrow = Global.TableRuntime.NewRow();
+                dtrow["OSVersion"] = string.Empty;
+                dtrow["OSCaption"] = string.Empty;
+                dtrow["RequiredPSWUModuleVersion"] = string.Empty;
                 dtrow["Servername"] = "";
                 dtrow["IP"] = "";
                 dtrow["Username"] = "";
